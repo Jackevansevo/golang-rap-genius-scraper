@@ -9,6 +9,13 @@ import (
 	"github.com/PuerkitoBio/goquery"
 )
 
+// [TODO] Fix script to look up artists who's name begins with a number, e.g.
+// ["2 Chainz", "2Pac", "50 Cent"]
+
+type urlName struct {
+	name, url string
+}
+
 func readLines(filename string) []string {
 	content, err := ioutil.ReadFile(filename)
 	if err != nil {
@@ -18,12 +25,16 @@ func readLines(filename string) []string {
 	return lines[:len(lines)-1]
 }
 
-func findArtistPage(url string, artist string) (artist_page string) {
+func scrapePage(url string) *goquery.Document {
 	doc, err := goquery.NewDocument(url)
 	if err != nil {
 		log.Fatal(err)
 	}
-	// Break out the loop by returning false once we've found the corresponding link
+	return doc
+}
+
+func findArtistPage(url string, artist string) (artist_page string) {
+	doc := scrapePage(url)
 	doc.Find(".artists_index_list li a").EachWithBreak(func(i int, s *goquery.Selection) bool {
 		if strings.EqualFold(s.Text(), artist) {
 			artist_page, _ = s.Attr("href")
@@ -34,47 +45,33 @@ func findArtistPage(url string, artist string) (artist_page string) {
 	return
 }
 
-// [TODO] Instead of returnign a single list of urls I need to return a data
-// type that returns the album name, along with corresponding url i.e. {'album_name': url}
-func findAlbumPages(url string) (album_pages []string) {
-	doc, err := goquery.NewDocument(url)
-	if err != nil {
-		log.Fatal(err)
-	}
-	doc.Find(".album_list .album_link").Each(func(i int, s *goquery.Selection) {
-		album_page, _ := s.Attr("href")
-		album_pages = append(album_pages, album_page)
+func findPages(url string, html string) *[]urlName {
+	doc := scrapePage(url)
+	pages := []urlName{}
+	doc.Find(html).Each(func(i int, s *goquery.Selection) {
+		page_url, _ := s.Attr("href")
+		page_name := strings.TrimSpace(s.Text())
+		pages = append(pages, urlName{page_name, page_url})
 	})
-	return
-}
-
-// [TODO] Do same here
-func findSongPages(url string) (song_pages []string) {
-	doc, err := goquery.NewDocument(url)
-	if err != nil {
-		log.Fatal(err)
-	}
-	doc.Find(".album_tracklist ul li a").Each(func(i int, s *goquery.Selection) {
-		song_page, _ := s.Attr("href")
-		song_pages = append(song_pages, song_page)
-	})
-	return
+	return &pages
 }
 
 func main() {
 	index_url := "http://genius.com/artists-index/"
 	artists := readLines("artists.txt")
+	// [TODO] Don't loop through artists, map through instead
 	for _, artist := range artists {
 		first_char := artist[0:1]
-		page_url := findArtistPage(index_url+first_char, artist)
-		if len(page_url) != 0 {
-			fmt.Printf("\n%s\n", page_url)
-			album_pages := findAlbumPages(page_url)
-			for _, album_page := range album_pages {
-				fmt.Println(album_page)
-				song_pages := findSongPages("http://genius.com" + album_page)
-				for _, song_page := range song_pages {
-					fmt.Println(song_page)
+		artist_page_url := findArtistPage(index_url+first_char, artist)
+		if len(artist_page_url) != 0 {
+			fmt.Printf("\n%s\n", artist_page_url)
+			album_pages := findPages(artist_page_url, ".album_list .album_link")
+			for _, album_page := range *album_pages {
+				fmt.Printf("\n%s\n", album_page.name)
+				full_album_page_url := "http://genius.com" + album_page.url
+				song_pages := findPages(full_album_page_url, ".album_tracklist ul li a")
+				for _, song_page := range *song_pages {
+					fmt.Println(song_page.name)
 				}
 			}
 		} else {
