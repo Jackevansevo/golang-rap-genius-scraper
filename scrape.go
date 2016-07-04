@@ -12,8 +12,23 @@ import (
 // [TODO] Fix script to look up artists who's name begins with a number, e.g.
 // ["2 Chainz", "2Pac", "50 Cent"]
 
+// For finding songs
+// findPages(root_url+album_page.url, ".album_tracklist ul li a .song_title")
+
 type urlName struct {
 	name, url string
+}
+
+type artistPage struct {
+	artist_name, url string
+}
+
+type albumPage struct {
+	artist_name, album_name, url string
+}
+
+type songPage struct {
+	artist_name, album_name, song_name, url string
 }
 
 func readLines(filename string) []string {
@@ -33,8 +48,10 @@ func scrapePage(url string) *goquery.Document {
 	return doc
 }
 
-func findArtistPage(url string, artist string) (artist_page string) {
-	doc := scrapePage(url)
+func findArtistPage(artist string, ch chan<- artistPage) {
+	index_url := "http://genius.com/artists-index/"
+	doc := scrapePage(index_url + artist[0:1])
+	var artist_page string = ""
 	doc.Find(".artists_index_list li a").EachWithBreak(func(i int, s *goquery.Selection) bool {
 		if strings.EqualFold(s.Text(), artist) {
 			artist_page, _ = s.Attr("href")
@@ -42,40 +59,49 @@ func findArtistPage(url string, artist string) (artist_page string) {
 		}
 		return true
 	})
-	return
+	ch <- artistPage{artist, artist_page}
 }
 
-func findPages(url string, html string) *[]urlName {
+func findAlbumPages(url string, artist string, html string, ch chan<- []albumPage) {
 	doc := scrapePage(url)
-	pages := []urlName{}
+	pages := []albumPage{}
 	doc.Find(html).Each(func(i int, s *goquery.Selection) {
 		page_url, _ := s.Attr("href")
 		page_name := strings.TrimSpace(s.Text())
-		pages = append(pages, urlName{page_name, page_url})
+		pages = append(pages, albumPage{artist, page_name, page_url})
 	})
-	return &pages
+	ch <- pages
 }
 
 func main() {
-	index_url := "http://genius.com/artists-index/"
 	artists := readLines("artists.txt")
-	// [TODO] Don't loop through artists, map through instead
+	artistPageCh := make(chan artistPage)
 	for _, artist := range artists {
-		first_char := artist[0:1]
-		artist_page_url := findArtistPage(index_url+first_char, artist)
-		if len(artist_page_url) != 0 {
-			fmt.Printf("\n%s\n", artist_page_url)
-			album_pages := findPages(artist_page_url, ".album_list .album_link")
-			for _, album_page := range *album_pages {
-				fmt.Printf("\n%s\n", album_page.name)
-				full_album_page_url := "http://genius.com" + album_page.url
-				song_pages := findPages(full_album_page_url, ".album_tracklist ul li a")
-				for _, song_page := range *song_pages {
-					fmt.Println(song_page.name)
-				}
-			}
-		} else {
-			fmt.Printf("Artist not found: %s\n", artist)
+		go findArtistPage(artist, artistPageCh)
+	}
+
+	artist_pages := []artistPage{}
+	for i := 0; i < len(artists); i++ {
+		artist_pages = append(artist_pages, <-artistPageCh)
+	}
+
+	albumPageCh := make(chan []albumPage)
+	for elem := range artist_pages {
+		url := artist_pages[elem].url
+		name := artist_pages[elem].artist_name
+		go findAlbumPages(url, name, ".album_list .album_link", albumPageCh)
+	}
+
+	album_pages := [][]albumPage{}
+	for i := 0; i < len(artist_pages); i++ {
+		album_pages = append(album_pages, <-albumPageCh)
+	}
+
+	// [TODO] Figure out a way of linking together the structs
+	// artists -> album_pages -> songs
+	for artist := range album_pages {
+		for album := range album_pages[artist] {
+			fmt.Println(album_pages[artist][album])
 		}
 	}
 }
