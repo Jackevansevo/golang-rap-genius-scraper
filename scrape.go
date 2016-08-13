@@ -15,10 +15,6 @@ import (
 // For finding songs
 // findPages(root_url+album_page.url, ".album_tracklist ul li a .song_title")
 
-type urlName struct {
-	name, url string
-}
-
 type artistPage struct {
 	artist_name, url string
 }
